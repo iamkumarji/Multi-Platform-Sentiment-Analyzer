@@ -9,6 +9,7 @@ A real-time sentiment analysis dashboard built with Streamlit. Scrape live data 
 ## Features
 
 - **Multi-platform data collection** — Reddit (no API key), X.com (Bearer Token), Amazon.in (web scraping)
+- **File upload support** — Analyze your own CSV or TXT files with VADER and/or RoBERTa
 - **Dual-model sentiment analysis** — VADER (fast, rule-based) + RoBERTa (transformer-based, more accurate)
 - **5-tab interactive dashboard**
   - **Overview** — Distribution bar chart, pie chart, platform radar comparison
@@ -86,12 +87,34 @@ The app will open at `http://localhost:8501`.
 
 ## Usage
 
-1. Enter a keyword or topic in the sidebar (e.g., "iPhone", "ChatGPT")
-2. Select one or more platforms — Reddit, X.com, Amazon.in
-3. Adjust the results limit (10–200 per platform)
-4. Toggle **RoBERTa model** for higher accuracy (slower)
-5. Click **Search & Analyze**
-6. Explore results across the 5 dashboard tabs
+### Search Online
+
+1. Select **Search Online** in the sidebar
+2. Enter a keyword or topic (e.g., "iPhone", "ChatGPT")
+3. Select one or more platforms — Reddit, X.com, Amazon.in
+4. Adjust the results limit (10–200 per platform)
+5. Toggle **RoBERTa model** for higher accuracy (slower)
+6. Click **Search & Analyze**
+7. Explore results across the 5 dashboard tabs
+
+### File Upload
+
+1. Select **Upload File** in the sidebar
+2. Upload a `.csv` or `.txt` file
+3. For CSV files, specify the **text column name** (default: `text`)
+4. Toggle **RoBERTa model** if desired
+5. Click **Analyze File**
+
+**Supported formats:**
+
+| Format | Requirements |
+|--------|-------------|
+| **CSV** | Must contain a column with the text to analyze (default name: `text`). Optional columns: `date` (enhances timeline charts), `author` (shown in Top Authors) |
+| **TXT** | One text entry per line — each line is treated as a separate text to analyze |
+
+**Notes:**
+- Optional `date` and `author` columns in CSV files enhance the timeline and author visualizations
+- All 5 dashboard tabs work with uploaded data, same as with online search results
 
 ## Platform Setup
 

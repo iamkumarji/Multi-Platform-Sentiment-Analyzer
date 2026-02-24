@@ -69,33 +69,65 @@ with st.sidebar:
     st.caption("Search across platforms & analyze sentiment in real-time")
     st.markdown("---")
 
-    keyword = st.text_input(
-        "🔍 Keyword / Topic",
-        placeholder="e.g. iPhone, ChatGPT, Modi",
+    input_mode = st.radio(
+        "📥 Input Mode",
+        ["Search Online", "Upload File"],
+        horizontal=True,
     )
 
-    platforms = st.multiselect(
-        "🌐 Select Platforms",
-        list(PLATFORM_OPTIONS.keys()),
-        default=["Reddit"],
-    )
-
-    limit = st.slider("Results per platform", min_value=10, max_value=200, value=50, step=10)
-
+    # Shared model toggle
     use_roberta = st.toggle("Use RoBERTa model (slower, more accurate)", value=False)
 
     st.markdown("---")
-    analyze_btn = st.button(
-        "🚀 Search & Analyze",
-        type="primary",
-        use_container_width=True,
-    )
+
+    # ── Mode-specific controls ──
+    if input_mode == "Search Online":
+        keyword = st.text_input(
+            "🔍 Keyword / Topic",
+            placeholder="e.g. iPhone, ChatGPT, Modi",
+        )
+
+        platforms = st.multiselect(
+            "🌐 Select Platforms",
+            list(PLATFORM_OPTIONS.keys()),
+            default=["Reddit"],
+        )
+
+        limit = st.slider("Results per platform", min_value=10, max_value=200, value=50, step=10)
+
+        analyze_btn = st.button(
+            "🚀 Search & Analyze",
+            type="primary",
+            use_container_width=True,
+        )
+        upload_btn = False
+    else:
+        keyword = ""
+        platforms = []
+        analyze_btn = False
+
+        uploaded_file = st.file_uploader(
+            "📄 Upload CSV or TXT",
+            type=["csv", "txt"],
+        )
+
+        text_col_name = st.text_input(
+            "Text column name (for CSV)",
+            value="text",
+            help="Name of the column containing the text to analyze",
+        )
+
+        upload_btn = st.button(
+            "🔬 Analyze File",
+            type="primary",
+            use_container_width=True,
+        )
 
     # ── X.com API Settings ──
     st.markdown("---")
     with st.expander(
         "🔗 X.com (Twitter) API",
-        expanded=("X.com (Twitter)" in platforms and not _has_twitter_creds()),
+        expanded=(input_mode == "Search Online" and "X.com (Twitter)" in platforms and not _has_twitter_creds()),
     ):
         st.caption("X.com tweets are fetched via the Twitter API v2. Get a Bearer Token from the [Twitter Developer Portal](https://developer.x.com/en/portal/dashboard). Stored locally in `.env`.")
 
@@ -137,17 +169,83 @@ May be rate-limited on heavy use.
 # ── Main Area ─────────────────────────────────────────────────────
 st.header("📊 Multi-Platform Sentiment Analyzer")
 
-if not analyze_btn and "results" not in st.session_state:
+if not analyze_btn and not upload_btn and "results" not in st.session_state:
     st.markdown("""
     **How it works:**
-    1. Enter a keyword in the sidebar
+    1. Enter a keyword in the sidebar **or** upload a CSV/TXT file
     2. Select one or more platforms (X.com, Reddit, Amazon.in)
-    3. Click **Search & Analyze**
-    4. The app scrapes live data from the selected platforms and runs sentiment analysis
+    3. Click **Search & Analyze** or **Analyze File**
+    4. The app scrapes live data or processes your file and runs sentiment analysis
 
     Results include sentiment scores, charts, word clouds, and a downloadable data table.
     """)
     st.stop()
+
+
+# ── File Upload Processing ────────────────────────────────────────
+if upload_btn:
+    if uploaded_file is None:
+        st.error("Please upload a CSV or TXT file first.")
+        st.stop()
+
+    file_name = uploaded_file.name
+    progress_container = st.container()
+
+    with progress_container:
+        st.subheader("📄 Processing Uploaded File...")
+        upload_progress = st.progress(0, text="Reading file...")
+
+        # Read file into DataFrame
+        try:
+            if file_name.lower().endswith(".csv"):
+                raw_df = pd.read_csv(uploaded_file)
+                if text_col_name not in raw_df.columns:
+                    st.error(f"Column **\"{text_col_name}\"** not found in CSV. Available columns: {', '.join(raw_df.columns)}")
+                    st.stop()
+            else:
+                # TXT: one text per line
+                content = uploaded_file.read().decode("utf-8", errors="replace")
+                lines = [line.strip() for line in content.splitlines() if line.strip()]
+                raw_df = pd.DataFrame({"text": lines})
+                text_col_name = "text"
+        except Exception as e:
+            st.error(f"Failed to read file: {e}")
+            st.stop()
+
+        upload_progress.progress(0.3, text="Building analysis DataFrame...")
+
+        # Build pipeline-compatible DataFrame
+        combined = pd.DataFrame({
+            "id": [f"upload_{i}" for i in range(len(raw_df))],
+            "text": raw_df[text_col_name].astype(str),
+            "platform": "upload",
+            "author": raw_df["author"].astype(str) if "author" in raw_df.columns else "—",
+            "date": pd.to_datetime(raw_df["date"], errors="coerce") if "date" in raw_df.columns else pd.NaT,
+            "metadata": [{}] * len(raw_df),
+        })
+
+        # Drop rows with empty text
+        combined = combined[combined["text"].str.strip().astype(bool)].reset_index(drop=True)
+
+        if combined.empty:
+            st.error("No valid text found in the uploaded file.")
+            st.stop()
+
+        st.success(f"📄 Loaded **{len(combined)}** texts from **{file_name}**")
+        upload_progress.progress(0.5, text="Loading sentiment models...")
+
+        # Analysis phase
+        st.subheader("🧠 Running Sentiment Analysis...")
+        pipeline = load_pipeline(use_roberta)
+        upload_progress.progress(0.7, text="Analyzing text...")
+
+        result = pipeline.analyze_dataframe(combined, show_progress=False)
+        upload_progress.progress(1.0, text="Analysis complete!")
+
+    # Store in session state
+    st.session_state["results"] = result
+    st.session_state["keyword"] = file_name
+    st.session_state["platforms_used"] = ["upload"]
 
 
 # ── Search & Analyze ──────────────────────────────────────────────
@@ -229,7 +327,8 @@ if "results" in st.session_state:
     import json
 
     st.markdown("---")
-    st.header(f"📊 Results for \"{kw}\"")
+    is_upload = used_platforms == ["upload"]
+    st.header(f"📊 Results for uploaded file \"{kw}\"" if is_upload else f"📊 Results for \"{kw}\"")
 
     # ── Enhanced KPI Row (6 metrics) ──
     counts = df[label_col].value_counts(normalize=True) * 100 if label_col in df.columns else pd.Series()
